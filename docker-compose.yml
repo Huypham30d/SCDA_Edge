@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  influxdb:
+    image: influxdb:2.7
+    container_name: scada_influxdb
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    restart: always
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: scada_grafana
+    ports:
+      - "3000:3000"
+    volumes:                                  
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      # --- CẤU HÌNH GỬI EMAIL ---
+      - GF_SMTP_ENABLED=true
+      - GF_SMTP_HOST=smtp.gmail.com:587
+      - GF_SMTP_USER=phamviethuy1210@gmail.com
+      - GF_SMTP_PASSWORD=kshecrmhcrckjowo
+      - GF_SMTP_SKIP_VERIFY=true
+      - GF_SMTP_FROM_ADDRESS=phamviethuy1210@gmail.com
+      - GF_SMTP_FROM_NAME=SCADA Alert System
+    depends_on:
+      - influxdb
+    restart: always
+
+volumes:
+  influxdb_data:
+  grafana_data:

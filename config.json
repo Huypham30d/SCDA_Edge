@@ -1,0 +1,15 @@
+{
+    "anomaly_threshold": 1942.0689955089572,
+    "mae": 344.20744585072663,
+    "rmse": 634.1133425522355,
+    "features": [
+        "Wind Speed (m/s)",
+        "Theoretical_Power_Curve (KWh)",
+        "Wind Direction (?)",
+        "Day_sin",
+        "Day_cos",
+        "Month_sin",
+        "Month_cos"
+    ],
+    "target": "LV ActivePower (kW)"
+}
