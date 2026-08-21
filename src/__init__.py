@@ -3,6 +3,8 @@ from src.feature_engineering import add_time_features
 from src.inference import PowerPredictor
 from src.anomaly_detector import detect_anomaly
 from src.influx_writer import InfluxWriter
+from src.scada_simulator import SCADASimulator, SimulationEvent
+from src.simulation_scenarios import ScenarioResult
 
 __all__ = [
     "load_data",
@@ -10,4 +12,7 @@ __all__ = [
     "PowerPredictor",
     "detect_anomaly",
     "InfluxWriter",
+    "SCADASimulator",
+    "SimulationEvent",
+    "ScenarioResult",
 ]
