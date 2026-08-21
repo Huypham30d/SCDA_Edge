@@ -1,0 +1,8 @@
+joblib
+numpy
+pandas
+xgboost
+scikit-learn
+influxdb-client
+python-dotenv
+pytest

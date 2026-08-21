@@ -1,0 +1,18 @@
+{
+  "enabled": true,
+  "turbine_count": 5,
+  "events_per_second": 5,
+  "loop_data": false,
+  "max_events": null,
+  "scenario": "normal",
+  "random_seed": 42,
+  "burst": {
+    "start_after_seconds": 10,
+    "duration_seconds": 10,
+    "multiplier": 5
+  },
+  "anomaly_injection": {
+    "probability": 0.05,
+    "actual_power_multiplier": 1.8
+  }
+}
