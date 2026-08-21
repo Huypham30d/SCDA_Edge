@@ -1,67 +1,85 @@
 import time
-import json
-import joblib
-import numpy as np
-import pandas as pd
-import xgboost as xgb
-from datetime import datetime
-from influxdb_client import InfluxDBClient, Point, WritePrecision
-from influxdb_client.client.write_api import SYNCHRONOUS
+from config.settings import (
+    CONFIG_PATH,
+    DATA_PATH,
+    MODEL_PATH,
+    SCALER_PATH,
+    InfluxSettings,
+    load_config,
+)
+from src.anomaly_detector import detect_anomaly
+from src.data_loader import load_data
+from src.feature_engineering import add_time_features
+from src.inference import PowerPredictor
+from src.influx_writer import InfluxWriter
 
-# 1. CẤU HÌNH INFLUXDB (Thay token của bạn vào đây)
-INFLUX_URL = "http://localhost:8086"
-INFLUX_TOKEN = "h5iEHwqHJnbuqfauTDgnIt0ag3tg8V3Ypum7BwP4pgjTSrzDSUnUvzhH5faK_0Au4uwkr8YSuZz5ckKckkGdNA==" 
-INFLUX_ORG = "scada_org"
-INFLUX_BUCKET = "turbine_metrics"
 
-client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
-write_api = client.write_api(write_options=SYNCHRONOUS)
+def main() -> None:
+    # 1. Tải cấu hình môi trường và cấu hình mô hình
+    settings = InfluxSettings.from_env()
+    config = load_config(CONFIG_PATH)
 
-# 2. TẢI MÔ HÌNH VÀ TIỀN XỬ LÝ
-model = xgb.XGBRegressor()
-model.load_model('xgboost_model.json')
-scaler = joblib.load('scaler.joblib')
+    threshold = config["anomaly_threshold"]
+    features = config["features"]
+    target = config["target"]
 
-with open('config.json', 'r') as f:
-    config = json.load(f)
+    # 2. Đọc dữ liệu và tạo đặc trưng thời gian
+    df_raw = load_data(DATA_PATH, features=features, target=target)
+    df = add_time_features(df_raw)
 
-threshold = config['anomaly_threshold']
-features = config['features']
+    # 3. Khởi tạo mô hình dự đoán
+    predictor = PowerPredictor(
+        model_path=MODEL_PATH,
+        scaler_path=SCALER_PATH,
+        features=features,
+    )
 
-df_test = pd.read_csv('test.csv').dropna()
-df_test['Date/Time'] = pd.to_datetime(df_test['Date/Time'], format='%d %m %Y %H:%M')
+    # 4. Khởi tạo InfluxDB writer và thực hiện vòng lặp streaming
+    writer = InfluxWriter(
+        url=settings.url,
+        token=settings.token,
+        org=settings.org,
+        bucket=settings.bucket,
+    )
 
-hour = df_test['Date/Time'].dt.hour
-minute = df_test['Date/Time'].dt.minute
-df_test['Day_sin'] = np.sin(2 * np.pi * (hour * 60 + minute) / 1440)
-df_test['Day_cos'] = np.cos(2 * np.pi * (hour * 60 + minute) / 1440)
-df_test['Month_sin'] = np.sin(2 * np.pi * df_test['Date/Time'].dt.month / 12)
-df_test['Month_cos'] = np.cos(2 * np.pi * df_test['Date/Time'].dt.month / 12)
+    print("Bắt đầu đẩy dữ liệu SCADA lên InfluxDB...")
 
-print("🚀 Bắt đầu đẩy dữ liệu SCADA lên InfluxDB...")
+    try:
+        for _, row in df.iterrows():
+            actual_power = float(row[target])
+            wind_speed = float(row["Wind Speed (m/s)"])
 
-# 3. VÒNG LẶP STREAMING
-for index, row in df_test.iterrows():
-    actual_power = row['LV ActivePower (kW)']
-    wind_speed = row['Wind Speed (m/s)']
-    
-    x_raw = row[features].to_frame().T
-    x_scaled = scaler.transform(x_raw)
-    pred_power = float(model.predict(x_scaled)[0])
-    
-    residual = float(abs(actual_power - pred_power))
-    is_anomaly = 1 if residual > threshold else 0
-    
-    point = Point("turbine_status") \
-        .tag("turbine_id", "T1") \
-        .field("wind_speed", float(wind_speed)) \
-        .field("actual_power", float(actual_power)) \
-        .field("predicted_power", float(pred_power)) \
-        .field("residual", float(residual)) \
-        .field("anomaly_flag", int(is_anomaly)) \
-        .time(time.time_ns(), WritePrecision.NS)
-    
-    write_api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=point)
-    print(f"Đã gửi: Gió {wind_speed:5.1f}m/s | Lệch {residual:6.1f}kW | Cảnh báo: {is_anomaly}")
-    
-    time.sleep(1) # Giả lập 1 giây gửi 1 mẫu
+            # Dự đoán công suất
+            pred_power = predictor.predict(row)
+
+            # Phát hiện bất thường
+            residual, is_anomaly = detect_anomaly(
+                actual_power=actual_power,
+                predicted_power=pred_power,
+                threshold=threshold,
+            )
+
+            # Ghi dữ liệu lên InfluxDB
+            writer.write_turbine_status(
+                turbine_id=settings.turbine_id,
+                wind_speed=wind_speed,
+                actual_power=actual_power,
+                predicted_power=pred_power,
+                residual=residual,
+                anomaly_flag=is_anomaly,
+            )
+
+            print(
+                f"Đã gửi: Gió {wind_speed:5.1f}m/s | Lệch {residual:6.1f}kW | Cảnh báo: {is_anomaly}"
+            )
+
+            time.sleep(settings.stream_interval_seconds)
+
+    except KeyboardInterrupt:
+        print("\n Đã dừng stream exporter bởi người dùng.")
+    finally:
+        writer.close()
+
+
+if __name__ == "__main__":
+    main()
