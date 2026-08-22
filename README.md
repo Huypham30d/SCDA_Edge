@@ -17,6 +17,7 @@ Hệ thống giám sát biên (Edge Computing) phát hiện bất thường côn
 9. [Checklist sau mỗi kịch bản thử nghiệm](#9-checklist-sau-mỗi-kịch-bản-thử-nghiệm)
 10. [Thiết lập Grafana & Truy vấn Flux](#10-thiết-lập-grafana--truy-vấn-flux)
 11. [Các lưu ý quan trọng](#11-các-lưu-ý-quan-trọng)
+12. [Thí nghiệm giới hạn pipeline trực tiếp](#12-thí-nghiệm-giới-hạn-pipeline-trực-tiếp)
 
 ---
 
@@ -453,3 +454,9 @@ from(bucket: "turbine_metrics")
 4. **Phân biệt `Injected anomalies` và `Detected anomalies`**: `Injected anomalies` là số lần simulator cố ý sửa công suất thực tế; `Detected anomalies` là số lần sai số vượt ngưỡng `anomaly_threshold`. Hai con số này không bắt buộc bằng nhau.
 5. **Dừng an toàn & Giới hạn sự kiện**: Nhấn `Ctrl + C` để dừng chương trình bất kỳ lúc nào. Khi chạy thử nghiệm, luôn khuyến nghị đặt `max_events` (ví dụ `25` hoặc `100`) để chương trình tự kết thúc và dễ dàng đối chiếu bộ đếm.
 6. **Bảo mật Credentials**: Tuyệt đối không commit file `.env` chứa token thật lên Git.
+
+---
+
+## 12. Thí nghiệm giới hạn pipeline trực tiếp
+
+Xem hướng dẫn tại [Direct Pipeline Loss Experiment](experiments/README.md).

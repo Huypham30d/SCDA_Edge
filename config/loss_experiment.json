@@ -1,0 +1,13 @@
+{
+  "experiment_id": "direct-overload-001",
+  "turbine_count": 5,
+  "source_events_per_second": 200,
+  "total_events": 5000,
+  "queue_capacity": 100,
+  "consumer_delay_seconds": 0.05,
+  "continue_on_write_error": true,
+  "drain_queue_after_source_stops": true,
+  "scenario": "normal",
+  "random_seed": 42,
+  "result_directory": "experiment_results"
+}
