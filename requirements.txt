@@ -6,3 +6,4 @@ scikit-learn
 influxdb-client
 python-dotenv
 pytest
+confluent-kafka

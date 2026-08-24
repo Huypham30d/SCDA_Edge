@@ -1,0 +1,22 @@
+{
+  "bootstrap_servers": "localhost:9092",
+  "raw_topic": "scada.raw.v1",
+  "dlq_topic": "scada.dlq.v1",
+  "consumer_group": "scada-influx-consumers",
+  "auto_offset_reset": "earliest",
+  "producer": {
+    "acks": "all",
+    "enable_idempotence": true,
+    "compression_type": "snappy",
+    "linger_ms": 10,
+    "batch_size": 65536,
+    "delivery_timeout_ms": 120000
+  },
+  "consumer": {
+    "enable_auto_commit": false,
+    "enable_auto_offset_store": false,
+    "poll_timeout_seconds": 1.0,
+    "max_processing_retries": 5,
+    "retry_backoff_seconds": 2.0
+  }
+}

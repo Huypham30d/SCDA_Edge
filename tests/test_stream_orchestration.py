@@ -37,21 +37,22 @@ class FakeWriter:
         residual: float,
         anomaly_flag: int,
         timestamp_ns: int | None = None,
+        **kwargs,
     ) -> None:
         if self.should_fail:
             raise ConnectionError("Fake InfluxDB connection error")
 
-        self.written_records.append(
-            {
-                "turbine_id": turbine_id,
-                "wind_speed": wind_speed,
-                "actual_power": actual_power,
-                "predicted_power": predicted_power,
-                "residual": residual,
-                "anomaly_flag": anomaly_flag,
-                "timestamp_ns": timestamp_ns,
-            }
-        )
+        record = {
+            "turbine_id": turbine_id,
+            "wind_speed": wind_speed,
+            "actual_power": actual_power,
+            "predicted_power": predicted_power,
+            "residual": residual,
+            "anomaly_flag": anomaly_flag,
+            "timestamp_ns": timestamp_ns,
+        }
+        record.update(kwargs)
+        self.written_records.append(record)
 
     def close(self) -> None:
         self.closed = True

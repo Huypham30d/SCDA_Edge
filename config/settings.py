@@ -17,6 +17,51 @@ DATA_PATH = BASE_DIR / "test.csv"
 MODEL_PATH = BASE_DIR / "xgboost_model.json"
 SCALER_PATH = BASE_DIR / "scaler.joblib"
 SIMULATOR_CONFIG_PATH = BASE_DIR / "config" / "simulator.json"
+KAFKA_CONFIG_PATH = BASE_DIR / "config" / "kafka.json"
+
+
+@dataclass(frozen=True)
+class KafkaSettings:
+    """Cấu hình tích hợp Apache Kafka cho producer và consumer."""
+
+    bootstrap_servers: str
+    raw_topic: str
+    dlq_topic: str
+    consumer_group: str
+    auto_offset_reset: str
+    producer_acks: str
+    producer_enable_idempotence: bool
+    producer_compression_type: str
+    producer_linger_ms: int
+    producer_batch_size: int
+    producer_delivery_timeout_ms: int
+    consumer_enable_auto_commit: bool
+    consumer_enable_auto_offset_store: bool
+    consumer_poll_timeout_seconds: float
+    consumer_max_processing_retries: int
+    consumer_retry_backoff_seconds: float
+
+    def to_producer_config(self) -> dict[str, Any]:
+        """Tạo cấu hình cho confluent_kafka.Producer."""
+        return {
+            "bootstrap.servers": self.bootstrap_servers,
+            "acks": self.producer_acks,
+            "enable.idempotence": self.producer_enable_idempotence,
+            "compression.type": self.producer_compression_type,
+            "linger.ms": self.producer_linger_ms,
+            "batch.size": self.producer_batch_size,
+            "delivery.timeout.ms": self.producer_delivery_timeout_ms,
+        }
+
+    def to_consumer_config(self) -> dict[str, Any]:
+        """Tạo cấu hình cho confluent_kafka.Consumer."""
+        return {
+            "bootstrap.servers": self.bootstrap_servers,
+            "group.id": self.consumer_group,
+            "auto.offset.reset": self.auto_offset_reset,
+            "enable.auto.commit": self.consumer_enable_auto_commit,
+            "enable.auto.offset.store": self.consumer_enable_auto_offset_store,
+        }
 
 
 @dataclass(frozen=True)
@@ -111,6 +156,156 @@ def load_config(config_path: Path | str = CONFIG_PATH) -> dict:
     with open(resolved_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
+
+def load_kafka_settings(
+    config_path: Path | str = KAFKA_CONFIG_PATH,
+) -> KafkaSettings:
+    """Tải, validate và trả về cấu hình Kafka.
+
+    Cho phép biến môi trường override:
+    - KAFKA_CONFIG_PATH
+    - KAFKA_BOOTSTRAP_SERVERS
+    - KAFKA_RAW_TOPIC
+    - KAFKA_DLQ_TOPIC
+    - KAFKA_CONSUMER_GROUP
+    """
+    env_config_path = os.getenv("KAFKA_CONFIG_PATH")
+    if config_path == KAFKA_CONFIG_PATH and env_config_path:
+        resolved_path = Path(env_config_path)
+        if not resolved_path.is_absolute():
+            resolved_path = BASE_DIR / resolved_path
+    else:
+        resolved_path = Path(config_path)
+
+    if not resolved_path.exists():
+        raise FileNotFoundError(f"Không tìm thấy file cấu hình Kafka: {resolved_path}")
+
+    try:
+        with open(resolved_path, "r", encoding="utf-8") as f:
+            raw_data = json.load(f)
+    except Exception as exc:
+        raise ValueError(
+            f"Không thể đọc file JSON cấu hình Kafka '{resolved_path}': {exc}"
+        ) from exc
+
+    if not isinstance(raw_data, dict):
+        raise ValueError("Cấu hình Kafka phải là một JSON Object (dict).")
+
+    # Bootstrap servers
+    bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS") or raw_data.get("bootstrap_servers", "")
+    if not isinstance(bootstrap_servers, str) or not bootstrap_servers.strip():
+        raise ValueError("Trường 'bootstrap_servers' không được để trống.")
+    bootstrap_servers = bootstrap_servers.strip()
+
+    # Raw topic
+    raw_topic = os.getenv("KAFKA_RAW_TOPIC") or raw_data.get("raw_topic", "")
+    if not isinstance(raw_topic, str) or not raw_topic.strip():
+        raise ValueError("Trường 'raw_topic' không được để trống.")
+    raw_topic = raw_topic.strip()
+
+    # DLQ topic
+    dlq_topic = os.getenv("KAFKA_DLQ_TOPIC") or raw_data.get("dlq_topic", "")
+    if not isinstance(dlq_topic, str) or not dlq_topic.strip():
+        raise ValueError("Trường 'dlq_topic' không được để trống.")
+    dlq_topic = dlq_topic.strip()
+
+    # Consumer group
+    consumer_group = os.getenv("KAFKA_CONSUMER_GROUP") or raw_data.get("consumer_group", "")
+    if not isinstance(consumer_group, str) or not consumer_group.strip():
+        raise ValueError("Trường 'consumer_group' không được để trống.")
+    consumer_group = consumer_group.strip()
+
+    # Auto offset reset
+    auto_offset_reset = raw_data.get("auto_offset_reset", "earliest")
+    if auto_offset_reset not in ("earliest", "latest", "error"):
+        raise ValueError(f"Trường 'auto_offset_reset' không hợp lệ: '{auto_offset_reset}'.")
+
+    # Producer settings
+    prod_cfg = raw_data.get("producer", {})
+    if not isinstance(prod_cfg, dict):
+        raise ValueError("Trường 'producer' phải là một dictionary.")
+
+    producer_acks = str(prod_cfg.get("acks", "all")).strip()
+    if producer_acks not in ("all", "-1", "1", "0"):
+        raise ValueError(f"Trường 'producer.acks' không hợp lệ: '{producer_acks}'.")
+
+    producer_enable_idempotence = prod_cfg.get("enable_idempotence", True)
+    if not isinstance(producer_enable_idempotence, bool):
+        raise ValueError("Trường 'producer.enable_idempotence' phải là boolean.")
+
+    producer_compression_type = str(prod_cfg.get("compression_type", "snappy")).strip()
+
+    producer_linger_ms = prod_cfg.get("linger_ms", 10)
+    if type(producer_linger_ms) is not int or producer_linger_ms < 0:
+        raise ValueError("Trường 'producer.linger_ms' phải là số nguyên >= 0.")
+
+    producer_batch_size = prod_cfg.get("batch_size", 65536)
+    if type(producer_batch_size) is not int or producer_batch_size <= 0:
+        raise ValueError("Trường 'producer.batch_size' phải là số nguyên > 0.")
+
+    producer_delivery_timeout_ms = prod_cfg.get("delivery_timeout_ms", 120000)
+    if type(producer_delivery_timeout_ms) is not int or producer_delivery_timeout_ms <= 0:
+        raise ValueError("Trường 'producer.delivery_timeout_ms' phải là số nguyên > 0.")
+
+    # Consumer settings
+    cons_cfg = raw_data.get("consumer", {})
+    if not isinstance(cons_cfg, dict):
+        raise ValueError("Trường 'consumer' phải là một dictionary.")
+
+    consumer_enable_auto_commit = cons_cfg.get("enable_auto_commit", False)
+    if consumer_enable_auto_commit is not False:
+        raise ValueError(
+            "Cấu hình 'consumer.enable_auto_commit' bắt buộc phải là False để đảm bảo "
+            "offset chỉ được commit sau khi xử lý thành công."
+        )
+
+    consumer_enable_auto_offset_store = cons_cfg.get("enable_auto_offset_store", False)
+    if consumer_enable_auto_offset_store is not False:
+        raise ValueError(
+            "Cấu hình 'consumer.enable_auto_offset_store' bắt buộc phải là False để "
+            "kiểm soát chính xác việc lưu trữ offset."
+        )
+
+    consumer_poll_timeout_seconds = cons_cfg.get("poll_timeout_seconds", 1.0)
+    if (
+        type(consumer_poll_timeout_seconds) not in (int, float)
+        or isinstance(consumer_poll_timeout_seconds, bool)
+        or consumer_poll_timeout_seconds <= 0
+    ):
+        raise ValueError("Trường 'consumer.poll_timeout_seconds' phải là số > 0.")
+    consumer_poll_timeout_seconds = float(consumer_poll_timeout_seconds)
+
+    consumer_max_processing_retries = cons_cfg.get("max_processing_retries", 5)
+    if type(consumer_max_processing_retries) is not int or consumer_max_processing_retries < 0:
+        raise ValueError("Trường 'consumer.max_processing_retries' phải là số nguyên >= 0.")
+
+    consumer_retry_backoff_seconds = cons_cfg.get("retry_backoff_seconds", 2.0)
+    if (
+        type(consumer_retry_backoff_seconds) not in (int, float)
+        or isinstance(consumer_retry_backoff_seconds, bool)
+        or consumer_retry_backoff_seconds <= 0
+    ):
+        raise ValueError("Trường 'consumer.retry_backoff_seconds' phải là số > 0.")
+    consumer_retry_backoff_seconds = float(consumer_retry_backoff_seconds)
+
+    return KafkaSettings(
+        bootstrap_servers=bootstrap_servers,
+        raw_topic=raw_topic,
+        dlq_topic=dlq_topic,
+        consumer_group=consumer_group,
+        auto_offset_reset=auto_offset_reset,
+        producer_acks=producer_acks,
+        producer_enable_idempotence=producer_enable_idempotence,
+        producer_compression_type=producer_compression_type,
+        producer_linger_ms=producer_linger_ms,
+        producer_batch_size=producer_batch_size,
+        producer_delivery_timeout_ms=producer_delivery_timeout_ms,
+        consumer_enable_auto_commit=consumer_enable_auto_commit,
+        consumer_enable_auto_offset_store=consumer_enable_auto_offset_store,
+        consumer_poll_timeout_seconds=consumer_poll_timeout_seconds,
+        consumer_max_processing_retries=consumer_max_processing_retries,
+        consumer_retry_backoff_seconds=consumer_retry_backoff_seconds,
+    )
 
 def load_simulator_settings(
     config_path: Path | str = SIMULATOR_CONFIG_PATH,
